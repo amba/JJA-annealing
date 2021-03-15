@@ -9,12 +9,12 @@ def slave(input):
     N = input['N']
     maxiter = input['maxiter']
     temp = input['temp']
-    frustration = input['frustration']
+    frustration = "%.5g" % input['frustration']
     visit = input['visit']
     
     EJx = input['EJx']
     EJy = input['EJy']
-    phi0x = input['phi0x']
+    phi0x = "%.5g" % input['phi0x']
     
     print("input dict: ", input)
     print("EJX, EJY: %g, %g" % (EJx, EJy))
