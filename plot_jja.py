@@ -16,7 +16,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('data_folder', help="data folder with optimization output files")
 parser.add_argument('-c', '--command', action='append', default=[], help=" transformation command, see below; can be provided multiple times")
 parser.add_argument('--cmap', help="cmap for magnetization plot (default: gray)", default='gray')
-parser.add_argument('-v', '--pdf-viewer', help="open output pdf files with viewer")
+parser.add_argument('-v', '--pdf-viewer', help="open output pdf files with viewer", default='okular')
 
 args = parser.parse_args()
 
