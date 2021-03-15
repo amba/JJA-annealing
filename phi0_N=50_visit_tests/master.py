@@ -52,6 +52,7 @@ if __name__ == '__main__':
                 d['temp'] = T_start
                 d['visit'] = visit
                 d['maxiter'] = maxiter
+                args.append(d)
                 print(d)
     with multiprocessing.Pool(num_cores) as p:
         p.map(slave, args)
