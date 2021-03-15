@@ -1,0 +1,1 @@
+{"N": 50, "maxiter": 3968, "temp": 5000.0, "visit": 1.75, "restart_temp_ratio": 1e-09, "ejx": 1.0, "ejy": 1.0, "phi0x": 0.2, "frustration": 0.0, "trivial_frame": true, "output_dir": null, "pdf_viewer": null}

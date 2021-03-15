@@ -1,0 +1,1 @@
+{"free_energy": 129.80051099531306, "success": true, "message": ["Maximum number of iteration reached"], "free_energy_per_junction": 0.026489900203125114, "total_time": 802.1151316165924, "maxiter": 464, "n_free_energy_calls": 4760050, "time_per_call": 0.00016850981221134073, "time_per_call_per_junction": 3.4389757594151166e-08}
