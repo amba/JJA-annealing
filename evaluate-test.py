@@ -19,13 +19,14 @@ data_folders = [ f.path for f in os.scandir(folder) if f.is_dir() ]
 
 
 for data_folder in (data_folders):
-    with open(os.path.join(data_folder, 'runtime_stats.json'), 'r') as infile:
-        run_stats = json.load(infile)
-        print(run_stats)
-    with open(os.path.join(data_folder, 'args.json'), 'r') as infile:
-        args = json.load(infile)
-        print(args)
-    result_list.append({**run_stats, **args})
+    runtime_stats_json = os.path.join(data_folder, 'runtime_stats.json')
+    args_json = os.path.join(data_folder, 'args.json')
+    if os.path.isfile(runtime_stats_json) and os.path.isfile(args_json):
+        with open(runtime_stats_json, 'r') as infile:
+            run_stats = json.load(infile)
+        with open(args_json, 'r') as infile:
+            args = json.load(infile)
+        result_list.append({**run_stats, **args})
 
 result_list = sorted(result_list, key=lambda res: res['free_energy'])
 for result in (result_list):
