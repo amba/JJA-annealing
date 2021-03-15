@@ -46,7 +46,7 @@ if __name__ == '__main__':
     args = []
     for T_start in (1000, 5000, 10000):
         for T_end in (100, 50, 10):
-            for visit in (1.5, 1.75, 2):
+            for visit in (2, 1.75, 1.5):
                 maxiter = int((T_start / T_end) ** (1/(visit - 1)))
                 d = dict.copy()
                 d['temp'] = T_start
