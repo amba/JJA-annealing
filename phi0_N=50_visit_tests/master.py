@@ -54,6 +54,7 @@ if __name__ == '__main__':
                 d['maxiter'] = maxiter
             print(d)
             args.append(d)
+    print "\n".join(args)
     with multiprocessing.Pool(num_cores) as p:
         p.map(slave, args)
 
