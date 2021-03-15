@@ -40,7 +40,7 @@ if __name__ == '__main__':
     num_cores = multiprocessing.cpu_count()
     print("using %d jobs in parallel" % num_cores)
 
-    dict = {N: 'N', 'frustration': 0, 'EJx': 1, 'EJy': 1, 'phi0x': phi0x}
+    dict = {'N': N, 'frustration': 0, 'EJx': 1, 'EJy': 1, 'phi0x': phi0x}
 
     
     args = []
