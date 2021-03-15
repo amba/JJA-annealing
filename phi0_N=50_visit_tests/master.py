@@ -49,7 +49,7 @@ if __name__ == '__main__':
             for visit in (1.5, 1.75, 2):
                 maxiter = (T_start / T_end) ** (1/(1 - visit))
                 d = dict.copy()
-                d['temp'] = T_start,
+                d['temp'] = T_start
                 d['visit'] = visit
                 d['maxiter'] = maxiter
             print(d)
