@@ -1,0 +1,1 @@
+{"free_energy": 138.9397151210006, "success": true, "message": ["Maximum number of iteration reached"], "free_energy_per_junction": 0.02835504390224502, "total_time": 3432.9793090820312, "maxiter": 2000, "n_free_energy_calls": 20210086, "time_per_call": 0.00016986465614654144, "time_per_call_per_junction": 3.466625635643703e-08}
