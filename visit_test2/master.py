@@ -6,7 +6,7 @@ import numpy as np
 trivial_frame = True
 
 N = 50
-phi0x = 0.2
+phi0x = 0.3
 
 def slave(input):
     N = input['N']
@@ -44,10 +44,9 @@ if __name__ == '__main__':
 
     
     args = []
-    for T_start in (1000, 5000, 10000):
-        for T_end in (100, 50, 10):
-            for visit in (2, 1.75, 1.5):
-                maxiter = int((T_start / T_end) ** (1/(visit - 1)))
+    for T_start in (1000, 2000, 5000, 10000, 20000):
+        for visit in (1.75, 1.5):
+            for maxiter in (2000, 4000, 6000):
                 d = dict.copy()
                 d['temp'] = T_start
                 d['visit'] = visit
