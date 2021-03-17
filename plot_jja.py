@@ -27,9 +27,11 @@ magnetization_cmap = args.cmap
 
 print("opening data folder: ", data_folder)
 
-
+plot_pdf_phi = '/tmp/phi.pdf'
 plot_pdf_current = '/tmp/current.pdf'
 plot_pdf_magnetization = '/tmp/magnetization.pdf'
+
+phi_matrix = np.loadtxt(join(data_folder, 'phi.txt'))
 
 x_currents = np.loadtxt(join(data_folder, 'current_x.txt'))
 y_currents = np.loadtxt(join(data_folder, 'current_y.txt'))
@@ -46,7 +48,6 @@ x_current_ycoords = np.loadtxt(join(data_folder, 'current_x_coords_y.txt'))
 y_current_xcoords = np.loadtxt(join(data_folder, 'current_y_coords_x.txt'))
 y_current_ycoords = np.loadtxt(join(data_folder, 'current_y_coords_y.txt'))
 
-magnetization = np.loadtxt(join(data_folder, 'magnetization.txt'))
 
 with open(join(data_folder, 'args.json'), 'r') as infile:
     input_args = json.load(infile)
@@ -160,14 +161,23 @@ plt.savefig(plot_pdf_current)
 
 plt.clf()
 plt.title(title)
-
 # show x-axis left to right, y-axis bottom to top
 magnetization = np.flip(magnetization, axis=1) # imshow plots the first axis top to bottom
 magnetization = np.swapaxes(magnetization, 0, 1)
 
-plt.imshow(magnetization, aspect='auto', cmap=magnetization_cmap)
+plt.imshow(magnetization, aspect='equal', cmap=magnetization_cmap)
 plt.colorbar(format="%.1f", label=z_label)
 plt.savefig(plot_pdf_magnetization)
 
+plt.clf()
+plt.title(title)
+
+phi_matrix = np.flip(phi_matrix, axis=1)
+phi_matrix = np.swapaxes(phi_matrix, 0, 1)
+
+plt.imshow(phi_matrix, aspect='equal', cmap=magnetization_cmap)
+plt.colorbar(format="%.1f", label='φ')
+plt.savefig(plot_pdf_phi)
+
 if pdf_viewer:
-    subprocess.run([pdf_viewer, plot_pdf_current, plot_pdf_magnetization])
+    subprocess.run([pdf_viewer, plot_pdf_current, plot_pdf_magnetization, plot_pdf_phi])

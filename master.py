@@ -3,10 +3,11 @@
 import multiprocessing
 import subprocess
 import numpy as np
-trivial_frame = True
+boundary = 'trivial_bottom'
 
 def slave(input):
-    N = input['N']
+    Nx = input['Nx']
+    Ny = input['Ny']
     maxiter = input['maxiter']
     temp = input['temp']
     frustration = "%.5g" % input['frustration']
@@ -23,11 +24,9 @@ def slave(input):
            '--temp', str(temp), '--maxiter', str(maxiter), '--visit', str(visit),
                      
            # JJA properties
-           '-N', str(N), '--frustration', str(frustration), '--ejx', str(EJx), '--ejy', str(EJy),
-           '--phi0x', str(phi0x)
+           '-Nx', str(Nx), '-Ny', str(Ny), '--frustration', str(frustration), '--ejx', str(EJx), '--ejy', str(EJy),
+           '--phi0x', str(phi0x), '--boundary', boundary
     ]
-    if trivial_frame:
-        cmd.append('--trivial-frame')
     
     subprocess.call(cmd)
     
@@ -37,16 +36,14 @@ if __name__ == '__main__':
     num_cores = multiprocessing.cpu_count()
     print("using %d jobs in parallel" % num_cores)
 
-    dict = {'temp': 10000, 'maxiter': 2000, 'visit': 2, 'frustration': 0, 'EJx': 1, 'EJy': 1}
+    dict = {'Nx': 50, 'Ny': 50, 'temp': 2000, 'maxiter': 2000, 'visit': 1.5, 'frustration': 0, 'EJx': 1, 'EJy': 1}
     
     args = []
-    for N in (4, 5):
-        for phi0x in np.linspace(0, 1, 10):
-            d = dict.copy()
-            d['N'] = N
-            d['phi0x'] = phi0x
-            print(d)
-            args.append(d)
+    for phi0x in np.linspace(0, 1, 21):
+        d = dict.copy()
+        d['phi0x'] = phi0x
+        print(d)
+        args.append(d)
     with multiprocessing.Pool(num_cores) as p:
         p.map(slave, args)
 
