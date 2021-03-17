@@ -1,0 +1,1 @@
+['../jja.py', '--temp', '2000', '--maxiter', '2000', '--visit', '1.5', '-Nx', '50', '-Ny', '50', '--frustration', '0', '--ejx', '1', '--ejy', '1', '--phi0x', '0.5', '--boundary', 'trivial_bottom']
