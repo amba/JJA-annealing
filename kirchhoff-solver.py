@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import numpy as np
+import numpy.random
 import time
 np.set_printoptions(precision=3, linewidth=300)
 import subprocess
@@ -23,20 +24,7 @@ parser.add_argument('-Nx', help="system size (mandatory)", type=int,
                     required=True)
 parser.add_argument('-Ny', help="system size (mandatory)", type=int,
                     required=True)
-# parser.add_argument('-m', "--maxiter",
-#                     help="number of iterations (default: 1000)",
-#                     type=int, default=1000)
-# parser.add_argument('-t', "--temp",
-#                     help="initial temperature for annealing (default: 100e3)",
-#                     type=float, default=100e3)
-# parser.add_argument("--visit",
-#                     help="value for visit parameter for annealing (default: 2)",
-#                     type=float,
-#                     default=2)
-# parser.add_argument("--restart_temp_ratio",
-#                     help="restart annealing when temperature has fallen below initial_temp * restart_ratio. Resets temperature to initial_temp and uses a new random start state. Depending on maxiter, this can happen multiple times. Effectively the same as calling dual annealing multiple times and selecting the best annealing result (default: 1e-9, do not restart)",
-#                     type=float,
-#                     default=1e-9)
+
 parser.add_argument("-f", "--frustration", help="magnetic flux quanta per palette (default: 0)",
                     type=float,
                     default=0)
@@ -129,24 +117,20 @@ def save_matrix_as_txt(matrix, filename):
 # the free energy needs to be well-defined for these values.
 
 
-def gamma_matrices(phi_matrix, phi_L, A_x_matrix, A_y_matrix):
+def gamma_matrices(phi_matrix, A_x_matrix, A_y_matrix):
     # diff in x-direction
-    gamma_x = np.zeros((Nx + 1, Ny))
+    gamma_x = np.zeros((Nx - 1, Ny))
+    gamma_y = np.zeros((Nx - 2, Ny-1))
     gamma_x += A_x_matrix
                        
     # internal gammas
-    gamma_x[1:-1,:] += phi_matrix[1:,:] - phi_matrix[:-1,:]
+    gamma_x += phi_matrix[1:,:] - phi_matrix[:-1,:]
 
-    # left busbar
-    gamma_x[0,:] += phi_matrix[0,:] - phi_L
-
-    # right busbar
-    gamma_x[-1,:] += (0 - phi_matrix[-1,:])
     
     # gamma_x= phi_matrix[1:,:] - phi_matrix[:-1,:] + A_x_matrix
 
     # diff in y-direction
-    gamma_y = phi_matrix[:,1:] - phi_matrix[:,:-1] + A_y_matrix
+    gamma_y += phi_matrix[1:-1,1:] - phi_matrix[1:-1,:-1] + A_y_matrix
     return (gamma_x, gamma_y)
 
 ## x direction: I(φ) = b1x sin(φ) + b2x sin(2φ) + a1x cos(φ)
@@ -164,112 +148,89 @@ anisotropy = 1.5
 def current_phase_relation(gamma_x_matrix, gamma_y_matrix):
     x_currents = np.sin(gamma_x_matrix)
     y_currents = np.sin(gamma_y_matrix)
-    # # x_currents = b1x * np.sin(gamma_x_matrix) +\
-    # #     b2x * np.sin(2 * gamma_x_matrix) +\
-    # #     a1x * np.cos(gamma_x_matrix)
-    
-    # # y_currents =  b1y * np.sin(gamma_y_matrix) +\
-    # #     b2y * np.sin(2 * gamma_y_matrix) +\
-    # #     a1y * np.cos(gamma_y_matrix)
 
-    # x_currents = np.sin(gamma_x_matrix) / np.sqrt(1 - tau * np.sin(gamma_x_matrix /2)**2)
-    # y_currents = anisotropy * np.sin(gamma_y_matrix) / np.sqrt(1 - tau * np.sin(gamma_y_matrix /2)**2)
     
     return (x_currents, y_currents)
-
-# def free_energy(gamma_x_matrix, gamma_y_matrix):
-#     # f >= 0, f(γ = 0) = 0
-#     free_energy = 0
-#     # free_energy += np.sum(-np.sqrt(1 - tau * np.sin(gamma_x_matrix / 2)**2))
-#     # free_energy += anisotropy * np.sum(-np.sqrt(1 - tau * np.sin(gamma_y_matrix
-#                                                                  / 2)**2))
-#     # free_energy += np.sum(- b1x * np.cos(gamma_x_matrix) - 0.5 * b2x * np.cos(2 * gamma_x_matrix)  + a1x * np.sin(gamma_x_matrix))
-#     # free_energy += np.sum(- b1y * np.cos(gamma_y_matrix) - 0.5 * b2y * np.cos(2 * gamma_y_matrix)  + a1y * np.sin(gamma_y_matrix))
-                          
-#     return free_energy
-
 
 n_calls = 0
 
 
 def phi_vector_to_phi_matrix(phi_vector):
-    phi = np.reshape(phi_vector[:-1], (Nx, Ny))
-    return (phi, phi_vector[-1])
+    return np.reshape(phi_vector, (Nx, Ny))
 
-def phi_matrix_to_phi_vector(phi, phi_L):
-    r = np.zeros((Nx * Ny + 1))
-    r[:-1] = np.reshape(phi, Nx * Ny)
-    r[:1] = phi_L
-    return r
+def phi_matrix_to_phi_vector(phi):
+    return np.reshape(phi, Nx * Ny)
 
-def cost_function(phi, phi_L, I_DC, A_x_matrix, A_y_matrix):
-        gamma_x, gamma_y = gamma_matrices(phi, phi_L, A_x_matrix, A_y_matrix)
+def cost_function(phi, I_DC, A_x_matrix, A_y_matrix):
+        gamma_x, gamma_y = gamma_matrices(phi, A_x_matrix, A_y_matrix)
         x_current, y_current = current_phase_relation(gamma_x, gamma_y)
         # internal Kirchoff Law:
-        div_I = gamma_x[:-1,:] - gamma_x[1:,:] # div I has size (Nx, Ny) 
+        div_I = gamma_x[:-1,:] - gamma_x[1:,:] # div I has size (Nx-2, Ny) 
         div_I[:,1:] += gamma_y
         div_I[:,:-1] -= gamma_y
+        
         I_left_bar = np.sum(x_current[0,:])
+        I_right_bar = np.sum(x_current[-1,:])
+        
       #  print("I_left_bar: ", I_left_bar)
-        return np.linalg.norm(div_I) + (I_left_bar - I_DC)**2
+        return np.linalg.norm(div_I) + (I_left_bar - I_DC)**2 + (I_right_bar - I_DC)**2
 
-def optimize_jja(phi_start, phi_L_start, I_DC, A_x_matrix, A_y_matrix, *args, **kwargs):
+
+def optimize_jja(phi_start, I_DC, A_x_matrix, A_y_matrix, *args, **kwargs):
     
-    bounds = np.array([[-10, 10]])
-    bounds = np.repeat(bounds, Nx * Ny + 1, axis=0)
+    bounds = np.array([[-10*np.pi, 10*np.pi]])
+    bounds = np.repeat(bounds, Nx * Ny, axis=0)
     
     def f(phi_vector):
-        phi, phi_L = phi_vector_to_phi_matrix(phi_vector)
-        return cost_function(phi, phi_L, I_DC, A_x_matrix, A_y_matrix)
+        phi = phi_vector_to_phi_matrix(phi_vector)
+        return cost_function(phi, I_DC, A_x_matrix, A_y_matrix)
     
-    x0 = phi_matrix_to_phi_vector(phi_start, phi_L_start)
-    return scipy.optimize.minimize(f, x0, method='CG',  options={'norm': 2,  'maxiter': 1000})
+    x0 = phi_matrix_to_phi_vector(phi_start)
+    return scipy.optimize.dual_annealing(f, x0=x0, maxiter=1000, restart_temp_ratio=1e-12, initial_temp=1e-2, visit=2.1, bounds=bounds, no_local_search=True)
     
 # include factor -2e / hbar in vector potential
 def gen_vector_potential(Nx, Ny, f):
     # Nx x Ny JJA
     # f: f = psi / psi_0 flux per palette / magnetic_flux_quantum
     A_x = np.linspace(0, -Ny * f * const_flux, Ny)
-    A_x = np.tile(A_x, (Nx+1, 1))
-    A_y = np.zeros((Nx, Ny-1))
+    A_x = np.tile(A_x, (Nx-1, 1))
+    A_y = np.zeros((Nx-2, Ny-1))
     return(-2 * const_e / const_hbar * A_x, -2 * const_e / const_hbar  * A_y)
     
 
 A_x, A_y = gen_vector_potential(Nx, Ny, f)
 t_start = time.time()
-I_DC = 5
-I_JJ = I_DC*0.9 / Ny
+I_DC = 9
+I_JJ = I_DC / Ny
 delta_phi_approx = np.arcsin(I_JJ)
 print("delta phi approx = ", delta_phi_approx)
-phi_start = np.linspace(-delta_phi_approx * Nx, -delta_phi_approx, Nx)
+phi_start = np.linspace(-delta_phi_approx * (Nx - 1), 0, Nx)
 phi_start = np.tile(phi_start, (Ny, 1)).T
+phi_start += 0.00001 * numpy.random.randn(Nx, Ny)
 print(phi_start.shape)
-phi_L_start = -delta_phi_approx * (Nx + 1)
+# phi_start = np.remainder(phi_start, 2 * np.pi)
+# phi_L_start = np.remainder(phi_L_start, 2 * np.pi)
 print("phi start: ", phi_start)
-print("phi_L start: ", phi_L_start)
 #phi_start = np.zeros((Nx, Ny))
 #phi_L_start = 0
-print("cost function of start: ", cost_function(phi_start, phi_L_start, I_DC, A_x, A_y))
+print("cost function of start: ", cost_function(phi_start, I_DC, A_x, A_y))
 
-res = optimize_jja(phi_start, phi_L_start, I_DC, A_x, A_y)
-print(res)
+res = optimize_jja(phi_start, I_DC, A_x, A_y)
+print("fun = ", res.fun)
 total_time = time.time() - t_start
 # print(res.x)
 
 
-phi_matrix, phi_L = phi_vector_to_phi_matrix(res.x)
+phi_matrix = phi_vector_to_phi_matrix(res.x)
 print("phi: ", phi_matrix)
-print("phi_L: ", phi_L)
 
 #
 # calculate gammas/currents
 #
-gamma_x, gamma_y = gamma_matrices(phi_matrix, phi_L, A_x, A_y)
-print("gamma x: ", gamma_x)
-print("gamma y: ", gamma_y)
+gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
+
 x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
-print("x_currents: ", x_currents)
-print("y_currents: ", y_currents)
+
 
 island_x_coords, island_y_coords = np.meshgrid(np.arange(Nx+2), np.arange(Ny), indexing="ij")
 
