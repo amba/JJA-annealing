@@ -200,8 +200,7 @@ def optimize_jja(E_J_x_matrix, E_J_y_matrix, A_x_matrix, A_y_matrix, *args, **kw
         n_calls += 1
         phi_matrix = phi_vector_to_phi_matrix(phi_vector)
         
-        gamma_x = phi_matrix[1:,:] - phi_matrix[:-1,:] + A_x_matrix
-        gamma_y = phi_matrix[:,1:] - phi_matrix[:,:-1] + A_y_matrix
+        gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x_matrix, A_y_matrix)
         n_calls += 1
         return free_energy(gamma_x, gamma_y, E_J_x_matrix, E_J_y_matrix)
 

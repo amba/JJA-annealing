@@ -33,11 +33,12 @@ for result in (result_list):
     T_start = result['temp']
     visit = result['visit']
     maxiter = result['maxiter']
+    phi0x = result['phi0x']
 
     T_end = T_start * (2**(visit - 1) - 1) / (maxiter**(visit - 1) - 1)
     
-    print("T0 = %8d,\tT_E = %.1f,\t\tvisit = %.3f,\t\tmaxiter = %10d:\t\t\tfun = %.3f"
-          % (T_start, T_end, visit, maxiter, result['free_energy']))
+    print("phi0x = %.2g\t\t\tfun = %.3f"
+          % (phi0x, result['free_energy']))
     
 
         
