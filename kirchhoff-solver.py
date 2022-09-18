@@ -187,7 +187,7 @@ def optimize_jja(phi_start, I_DC, A_x_matrix, A_y_matrix, *args, **kwargs):
         return cost_function(phi, I_DC, A_x_matrix, A_y_matrix)
     
     x0 = phi_matrix_to_phi_vector(phi_start)
-    return scipy.optimize.dual_annealing(f, x0=x0, maxiter=300, restart_temp_ratio=1e-12, initial_temp=0.2, visit=2.5, bounds=bounds, no_local_search=True)
+    return scipy.optimize.dual_annealing(f, x0=x0, maxiter=500, restart_temp_ratio=1e-12, initial_temp=1e-1, visit=2.5, bounds=bounds, no_local_search=True)
     
 # include factor -2e / hbar in vector potential
 def gen_vector_potential(f):
@@ -221,58 +221,59 @@ A_x, A_y = gen_vector_potential(f)
 I_DC = 0
 
 x0 = int(Nx/2) - 0.5
-y0 = int(Ny/2) - 0.5
+y0 = int(Ny/2) - 0.1
 
-# phi_start = gen_phi0_vortex(x0, y0)
-# print("cost function of start: ", cost_function(phi_start, I_DC, A_x, A_y))
-# res = optimize_jja(phi_start, I_DC, A_x, A_y)
-# print("cost function after optimization = ", res.fun)
-# phi_matrix = phi_vector_to_phi_matrix(res.x)
-# F = free_energy(phi_matrix, A_x, A_y)
-# print("free energy: ", F)
+phi_start = gen_phi0_vortex(x0, y0)
+phi_start += gen_phi0_current(I_DC, 0)
+print("cost function of start: ", cost_function(phi_start, I_DC, A_x, A_y))
+res = optimize_jja(phi_start, I_DC, A_x, A_y)
+print("cost function after optimization = ", res.fun)
+phi_matrix = phi_vector_to_phi_matrix(res.x)
+F = free_energy(phi_matrix, A_x, A_y)
+print("free energy: ", F)
 
-I_vals = np.linspace(0, Ny/5, 20)
-F_vals = []
-I_real_vals = []
-cost_function_vals = []
+# I_vals = np.linspace(0, Ny/5, 20)
+# F_vals = []
+# I_real_vals = []
+# cost_function_vals = []
 
-for I_DC in I_vals:
-    phi_start = gen_phi0_current(I_DC, 0)
-    phi_start += gen_phi0_vortex(x0, y0)
+# for I_DC in I_vals:
+#     phi_start = gen_phi0_current(I_DC, 0)
+#     phi_start += gen_phi0_vortex(x0, y0)
 
-    gamma_x_start, gamma_y_start = gamma_matrices(phi_start, A_x, A_y)
-    print("cost function of start: ", cost_function(phi_start, I_DC, A_x, A_y))
-    res = optimize_jja(phi_start, I_DC, A_x, A_y)
-    print("cost function after optimization = ", res.fun)
-    cost_function_vals.append(res.fun)
+#     gamma_x_start, gamma_y_start = gamma_matrices(phi_start, A_x, A_y)
+#     print("cost function of start: ", cost_function(phi_start, I_DC, A_x, A_y))
+#     res = optimize_jja(phi_start, I_DC, A_x, A_y)
+#     print("cost function after optimization = ", res.fun)
+#     cost_function_vals.append(res.fun)
     
-    phi_matrix = phi_vector_to_phi_matrix(res.x)
-    #
-    # calculate gammas/currents
-    #
-    gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
-    x_current, y_current = current_phase_relation(gamma_x, gamma_y)
-    I_real_left = np.sum(x_current[0,:])
-    I_real_right = np.sum(x_current[-1,:])
-    I_real = (I_real_left + I_real_right) / 2
-    F = free_energy(phi_matrix, A_x, A_y)
-    F_vals.append(F)
-    I_real_vals.append(I_real)
-    print("I_DC = %g" % (I_DC))
-    print("I_left = %g, I_right = %g" % (I_real_left, I_real_right))
-    print("F(I = %g) = %g" % (I_real, F))
-    print("------------------\n")
-F_vals = np.array(F_vals)
+#     phi_matrix = phi_vector_to_phi_matrix(res.x)
+#     #
+#     # calculate gammas/currents
+#     #
+#     gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
+#     x_current, y_current = current_phase_relation(gamma_x, gamma_y)
+#     I_real_left = np.sum(x_current[0,:])
+#     I_real_right = np.sum(x_current[-1,:])
+#     I_real = (I_real_left + I_real_right) / 2
+#     F = free_energy(phi_matrix, A_x, A_y)
+#     F_vals.append(F)
+#     I_real_vals.append(I_real)
+#     print("I_DC = %g" % (I_DC))
+#     print("I_left = %g, I_right = %g" % (I_real_left, I_real_right))
+#     print("F(I = %g) = %g" % (I_real, F))
+#     print("------------------\n")
+# F_vals = np.array(F_vals)
 
-plt.plot(I_real_vals, F_vals, 'x', label = "one vortex")
-plt.legend()
-plt.grid()
-plt.show()
+# plt.plot(I_real_vals, F_vals, 'x', label = "one vortex")
+# plt.legend()
+# plt.grid()
+# plt.show()
 
-plt.clf()
-plt.plot(I_real_vals, cost_function_vals)
-plt.show()
-exit(1)
+# plt.clf()
+# plt.plot(I_real_vals, cost_function_vals)
+# plt.show()
+# exit(1)
 gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
 x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
 
