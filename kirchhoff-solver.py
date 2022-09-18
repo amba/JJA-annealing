@@ -28,8 +28,8 @@ parser.add_argument('-Ny', help="system size (mandatory)", type=int,
 parser.add_argument("-f", "--frustration", help="magnetic flux quanta per palette (default: 0)",
                     type=float,
                     default=0)
-parser.add_argument('-o', "--output-dir", help="output folder (default: use date+time")
-parser.add_argument('-v', '--pdf-viewer', help="open output pdf files with viewer")
+# parser.add_argument('-o', "--output-dir", help="output folder (default: use date+time")
+# parser.add_argument('-v', '--pdf-viewer', help="open output pdf files with viewer")
 
 parser_args = parser.parse_args()
 
@@ -47,22 +47,6 @@ Ny = parser_args.Ny
     
 f = parser_args.frustration
 
-output_dir = parser_args.output_dir
-pdf_viewer = parser_args.pdf_viewer
-
-
-
-date_string = datetime.now()
-date_string = date_string.strftime("%Y-%m-%d_%H-%M-%S")
-
-data_folder = date_string + "_JJA"
-
-for key, value in vars(parser_args).items():
-    if value is not None:
-        data_folder += "_" + key + "=" + str(value)
-    
-print("data folder: ", data_folder)
-pathlib.Path(data_folder).mkdir()
 
 
 
@@ -82,7 +66,7 @@ run_stats = {}
 #
 # x is 0th-dimension, y is 1st dimension of numpy array
 
-
+island_x_coords, island_y_coords = np.meshgrid(np.arange(Nx), np.arange(Ny), indexing="ij")
 
 
 # φ_L is the phase in the left busbar, the phase in the right bus-bar is
@@ -142,17 +126,29 @@ def gamma_matrices(phi_matrix, A_x_matrix, A_y_matrix):
 # b2y = 0.4
 # a1y = 0
 
-tau = 1
+tau = 0.95
 anisotropy = 1.5
+cos_param = 0.5
+
 
 def current_phase_relation(gamma_x_matrix, gamma_y_matrix):
     x_currents = np.sin(gamma_x_matrix)
     y_currents = np.sin(gamma_y_matrix)
+    # subtract cos_param to approximately zero the phi_0 effect
+    # x_currents = np.sin(gamma_x_matrix - cos_param) / np.sqrt(1 - tau * np.sin((gamma_x_matrix - cos_param) / 2)**2)
+    # x_currents += cos_param * np.cos(gamma_x_matrix)
+    # y_currents = np.sin(gamma_y_matrix) / np.sqrt(1 - tau * np.sin(gamma_y_matrix / 2)**2)
+    # x_currents = np.sin(gamma_x_matrix) / np.sqrt(1 - np.sin(gamma_x_matrix /2)**2)
+    # y_currents =  np.sin(gamma_y_matrix) / np.sqrt(1 - np.sin(gamma_y_matrix /2)**2)
 
     
     return (x_currents, y_currents)
 
-n_calls = 0
+def free_energy(gamma_x_matrix, gamma_y_matrix):
+    E = 0
+    E += np.sum(1 - np.cos(gamma_x_matrix))
+    E += np.sum(1 - np.cos(gamma_y_matrix))
+    return E
 
 
 def phi_vector_to_phi_matrix(phi_vector):
@@ -165,9 +161,14 @@ def cost_function(phi, I_DC, A_x_matrix, A_y_matrix):
         gamma_x, gamma_y = gamma_matrices(phi, A_x_matrix, A_y_matrix)
         x_current, y_current = current_phase_relation(gamma_x, gamma_y)
         # internal Kirchoff Law:
-        div_I = gamma_x[:-1,:] - gamma_x[1:,:] # div I has size (Nx-2, Ny) 
-        div_I[:,1:] += gamma_y
-        div_I[:,:-1] -= gamma_y
+        # div I is calculated only for non-busbar islands
+        # div I has size (Nx-2, Ny)
+        # div I(island) = outgoing current - ingoing current
+        div_I = np.zeros((Nx - 2, Ny))
+        div_I += x_current[1:,:]
+        div_I -= x_current[:-1,:]
+        div_I[:,:-1] += y_current
+        div_I[:,1:] -= y_current
         
         I_left_bar = np.sum(x_current[0,:])
         I_right_bar = np.sum(x_current[-1,:])
@@ -186,10 +187,10 @@ def optimize_jja(phi_start, I_DC, A_x_matrix, A_y_matrix, *args, **kwargs):
         return cost_function(phi, I_DC, A_x_matrix, A_y_matrix)
     
     x0 = phi_matrix_to_phi_vector(phi_start)
-    return scipy.optimize.dual_annealing(f, x0=x0, maxiter=1000, restart_temp_ratio=1e-12, initial_temp=1e-2, visit=2.1, bounds=bounds, no_local_search=True)
+    return scipy.optimize.dual_annealing(f, x0=x0, maxiter=100, restart_temp_ratio=1e-12, initial_temp=1e-2, visit=1.5, bounds=bounds, no_local_search=True)
     
 # include factor -2e / hbar in vector potential
-def gen_vector_potential(Nx, Ny, f):
+def gen_vector_potential(f):
     # Nx x Ny JJA
     # f: f = psi / psi_0 flux per palette / magnetic_flux_quantum
     A_x = np.linspace(0, -Ny * f * const_flux, Ny)
@@ -197,44 +198,58 @@ def gen_vector_potential(Nx, Ny, f):
     A_y = np.zeros((Nx-2, Ny-1))
     return(-2 * const_e / const_hbar * A_x, -2 * const_e / const_hbar  * A_y)
     
+def gen_phi0_current(I_DC, noise):
+    I_JJ = I_DC / Ny
+    delta_phi_approx = np.arcsin(I_JJ)
+    print("delta phi approx = ", delta_phi_approx)
+    phi_start = np.linspace(-delta_phi_approx * (Nx - 1), 0, Nx)
+    phi_start = np.tile(phi_start, (Ny, 1)).T
+    phi_start += noise * numpy.random.randn(Nx, Ny)
+    return phi_start
 
-A_x, A_y = gen_vector_potential(Nx, Ny, f)
+def gen_phi0_vortex(x0, y0):
+    phi_start = np.arctan2(island_y_coords - y0, island_x_coords - x0)
+    return phi_start
+
+def normalize_phase(phi):
+    # normalize to (-np.pi, np.pi)
+    phi = np.fmod(phi, 2 * np.pi)
+    phi[phi > np.pi] -= 2*np.pi
+    return phi
+
+A_x, A_y = gen_vector_potential(f)
 t_start = time.time()
-I_DC = 9
-I_JJ = I_DC / Ny
-delta_phi_approx = np.arcsin(I_JJ)
-print("delta phi approx = ", delta_phi_approx)
-phi_start = np.linspace(-delta_phi_approx * (Nx - 1), 0, Nx)
-phi_start = np.tile(phi_start, (Ny, 1)).T
-phi_start += 0.00001 * numpy.random.randn(Nx, Ny)
-print(phi_start.shape)
-# phi_start = np.remainder(phi_start, 2 * np.pi)
-# phi_L_start = np.remainder(phi_L_start, 2 * np.pi)
-print("phi start: ", phi_start)
-#phi_start = np.zeros((Nx, Ny))
-#phi_L_start = 0
-print("cost function of start: ", cost_function(phi_start, I_DC, A_x, A_y))
+I_DC = 0
 
+x0 = int(Nx/2) - 0.5
+y0 = int(Ny/2) - 0.5
+phi_start = gen_phi0_current(I_DC, 0)
+
+phi_start += gen_phi0_vortex(x0, y0)
+#phi_start = gen_phi0_current(I_DC, 0.1)
+gamma_x_start, gamma_y_start = gamma_matrices(phi_start, A_x, A_y)
+print("cost function of start: ", cost_function(phi_start, I_DC, A_x, A_y))
 res = optimize_jja(phi_start, I_DC, A_x, A_y)
 print("fun = ", res.fun)
 total_time = time.time() - t_start
 # print(res.x)
 
-
 phi_matrix = phi_vector_to_phi_matrix(res.x)
-print("phi: ", phi_matrix)
+#print("phi: ", phi_matrix)
 
 #
 # calculate gammas/currents
 #
 gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
 
+E = free_energy(gamma_x, gamma_y)
+print("E = ", E)
 x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
 
 
-island_x_coords, island_y_coords = np.meshgrid(np.arange(Nx+2), np.arange(Ny), indexing="ij")
+island_x_coords, island_y_coords = np.meshgrid(np.arange(Nx), np.arange(Ny), indexing="ij")
 
-x_current_xcoords, x_current_ycoords = np.meshgrid(np.arange(Nx+1), np.arange(Ny), indexing="ij")
+x_current_xcoords, x_current_ycoords = np.meshgrid(np.arange(Nx-1), np.arange(Ny), indexing="ij")
 
 x_current_xcoords = x_current_xcoords.astype('float64')
 x_current_ycoords = x_current_ycoords.astype('float64')
@@ -242,56 +257,113 @@ x_current_ycoords = x_current_ycoords.astype('float64')
 x_current_xcoords += 0.5
 
 
-y_current_xcoords, y_current_ycoords = np.meshgrid(np.arange(Nx), np.arange(Ny-1), indexing="ij")
+y_current_xcoords, y_current_ycoords = np.meshgrid(np.arange(Nx-2), np.arange(Ny-1), indexing="ij")
 
 y_current_xcoords = y_current_xcoords.astype('float64')
 y_current_ycoords = y_current_ycoords.astype('float64')
 
+y_current_xcoords += 1
 y_current_ycoords += 0.5
 
+plt.clf()
+plt.title("grad phi")
+plt.axes().set_aspect('equal')
+plt.quiver(x_current_xcoords, x_current_ycoords,
+           normalize_phase(gamma_x - gamma_x_start), np.zeros(x_currents.shape),
+           pivot='mid', units='width', scale=Nx/4, width=1/(10*Nx))
+plt.quiver(y_current_xcoords, y_current_ycoords,
+           np.zeros(y_currents.shape), normalize_phase(gamma_y - gamma_y_start),
+           pivot='mid', units='width', scale=Nx/4, width=1/(10*Nx))
+plt.scatter(island_x_coords, island_y_coords, marker='s', c='b', s=5)
+plt.show()
 
-#
-# save matrices as txt
-#
-print(x_currents.shape)
-print(x_current_xcoords.shape)
-print(x_current_ycoords.shape)
-
-print(y_currents.shape)
-print(y_current_xcoords.shape)
-print(y_current_ycoords.shape)
-
-save_matrix_as_txt(phi_matrix, data_folder + "/phi.txt")
-
-save_matrix_as_txt(A_x, data_folder + "/A_x.txt")
-save_matrix_as_txt(A_y, data_folder + "/A_y.txt")
-
-save_matrix_as_txt(gamma_x, data_folder + "/gamma_x.txt")
-save_matrix_as_txt(gamma_y, data_folder + "/gamma_y.txt")
-
-save_matrix_as_txt(x_currents, data_folder + "/current_x.txt")
-save_matrix_as_txt(y_currents, data_folder + "/current_y.txt")
-
-save_matrix_as_txt(island_x_coords, data_folder + "/island_x.txt")
-save_matrix_as_txt(island_y_coords, data_folder + "/island_y.txt")
-
-save_matrix_as_txt(x_current_xcoords, data_folder + "/current_x_coords_x.txt")
-save_matrix_as_txt(x_current_ycoords, data_folder + "/current_x_coords_y.txt")
-save_matrix_as_txt(y_current_xcoords, data_folder + "/current_y_coords_x.txt")
-save_matrix_as_txt(y_current_ycoords, data_folder + "/current_y_coords_y.txt")
+plt.clf()
+plt.title("current")
+plt.axes().set_aspect('equal')
+plt.quiver(x_current_xcoords, x_current_ycoords,
+           x_currents, np.zeros(x_currents.shape),
+           pivot='mid', units='width', scale=2*Nx, width=1/(20*Nx))
+plt.quiver(y_current_xcoords, y_current_ycoords,
+           np.zeros(y_currents.shape), y_currents,
+           pivot='mid', units='width', scale=2*Nx, width=1/(20*Nx))
+plt.scatter(island_x_coords, island_y_coords, marker='s', c='b', s=5)
 
 
-# Save metadata
+plt.show()
 
-with open(data_folder + '/runtime_stats.json', 'w') as outfile:
-    json.dump(run_stats, outfile)
-    outfile.write("\n")
+plt.show()
 
-with open(data_folder + '/args.json', 'w') as outfile:
-    json.dump(vars(parser_args), outfile)
-    outfile.write("\n")
+plt.clf()
 
-with open(data_folder + '/args.txt', 'w') as outfile:
-    outfile.write(str(sys.argv))
-    outfile.write("\n")
+phi_matrix = np.flip(phi_matrix, axis=1)
+phi_matrix = np.swapaxes(phi_matrix, 0, 1)
+plt.title("phi")
+plt.imshow(phi_matrix, aspect='equal', cmap='gray')
+plt.colorbar(format="%.1f", label='φ')
+plt.show()
+import code
+code.interact()
+
+# output_dir = parser_args.output_dir
+# pdf_viewer = parser_args.pdf_viewer
+
+
+
+# date_string = datetime.now()
+# date_string = date_string.strftime("%Y-%m-%d_%H-%M-%S")
+
+# data_folder = date_string + "_JJA"
+
+# for key, value in vars(parser_args).items():
+#     if value is not None:
+#         data_folder += "_" + key + "=" + str(value)
+    
+# print("data folder: ", data_folder)
+# pathlib.Path(data_folder).mkdir()
+
+
+# #
+# # save matrices as txt
+# #
+# print(x_currents.shape)
+# print(x_current_xcoords.shape)
+# print(x_current_ycoords.shape)
+
+# print(y_currents.shape)
+# print(y_current_xcoords.shape)
+# print(y_current_ycoords.shape)
+
+# save_matrix_as_txt(phi_matrix, data_folder + "/phi.txt")
+
+# save_matrix_as_txt(A_x, data_folder + "/A_x.txt")
+# save_matrix_as_txt(A_y, data_folder + "/A_y.txt")
+
+# save_matrix_as_txt(gamma_x, data_folder + "/gamma_x.txt")
+# save_matrix_as_txt(gamma_y, data_folder + "/gamma_y.txt")
+
+# save_matrix_as_txt(x_currents, data_folder + "/current_x.txt")
+# save_matrix_as_txt(y_currents, data_folder + "/current_y.txt")
+
+# save_matrix_as_txt(island_x_coords, data_folder + "/island_x.txt")
+# save_matrix_as_txt(island_y_coords, data_folder + "/island_y.txt")
+
+# save_matrix_as_txt(x_current_xcoords, data_folder + "/current_x_coords_x.txt")
+# save_matrix_as_txt(x_current_ycoords, data_folder + "/current_x_coords_y.txt")
+# save_matrix_as_txt(y_current_xcoords, data_folder + "/current_y_coords_x.txt")
+# save_matrix_as_txt(y_current_ycoords, data_folder + "/current_y_coords_y.txt")
+
+
+# # Save metadata
+
+# with open(data_folder + '/runtime_stats.json', 'w') as outfile:
+#     json.dump(run_stats, outfile)
+#     outfile.write("\n")
+
+# with open(data_folder + '/args.json', 'w') as outfile:
+#     json.dump(vars(parser_args), outfile)
+#     outfile.write("\n")
+
+# with open(data_folder + '/args.txt', 'w') as outfile:
+#     outfile.write(str(sys.argv))
+#     outfile.write("\n")
 

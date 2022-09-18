@@ -1,0 +1,1 @@
+{"Nx": 18, "Ny": 18, "maxiter": 1000, "temp": 100000.0, "visit": 2, "restart_temp_ratio": 1e-09, "frustration": 0.5, "output_dir": null, "pdf_viewer": null}
