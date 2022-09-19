@@ -66,6 +66,15 @@ run_stats = {}
 # x is 0th-dimension, y is 1st dimension of numpy array
 
 island_x_coords, island_y_coords = np.meshgrid(np.arange(Nx), np.arange(Ny), indexing="ij")
+x_current_xcoords, x_current_ycoords = np.meshgrid(np.arange(Nx-1), np.arange(Ny), indexing="ij")
+
+x_current_xcoords = x_current_xcoords.astype('float64')
+x_current_ycoords = x_current_ycoords.astype('float64')
+x_current_xcoords += 0.5
+y_current_xcoords, y_current_ycoords = np.meshgrid(np.arange(Nx), np.arange(Ny-1), indexing="ij")
+y_current_xcoords = y_current_xcoords.astype('float64')
+y_current_ycoords = y_current_ycoords.astype('float64')
+y_current_ycoords += 0.5
 
 
 # φ_L is the phase in the left busbar, the phase in the right bus-bar is
@@ -103,7 +112,7 @@ def save_matrix_as_txt(matrix, filename):
 def gamma_matrices(phi_matrix, A_x_matrix, A_y_matrix):
     # diff in x-direction
     gamma_x = np.zeros((Nx - 1, Ny))
-    gamma_y = np.zeros((Nx - 2, Ny-1))
+    gamma_y = np.zeros((Nx, Ny-1))
     gamma_x += A_x_matrix
                        
     # internal gammas
@@ -113,7 +122,7 @@ def gamma_matrices(phi_matrix, A_x_matrix, A_y_matrix):
     # gamma_x= phi_matrix[1:,:] - phi_matrix[:-1,:] + A_x_matrix
 
     # diff in y-direction
-    gamma_y += phi_matrix[1:-1,1:] - phi_matrix[1:-1,:-1] + A_y_matrix
+    gamma_y += phi_matrix[:,1:] - phi_matrix[:,:-1] + A_y_matrix
     return (gamma_x, gamma_y)
 
 ## x direction: I(φ) = b1x sin(φ) + b2x sin(2φ) + a1x cos(φ)
@@ -129,6 +138,65 @@ tau = 0.95
 anisotropy = 1.5
 cos_param = 0.5
 
+# def current_phase_relation_x(gamma):
+#     return np.sin(gamma)
+
+# def current_phase_relation_y(gamma):
+#     return np.sin(gamma)
+
+
+def rzchowski_benz_tinkham_solver(phi_matrix, phi_r):
+    delta_phi = 0
+    phi_l = 0
+
+    # Solve Kirchoff equation for each island
+    for i in range(Nx):
+        for j in range(Ny):
+            sum_sin = 0
+            sum_cos = 0
+
+            # y-component
+            if j > 0:
+                sum_sin += np.sin(phi_matrix[i,j-1])
+                sum_cos += np.cos(phi_matrix[i,j-1])
+            if j < Ny - 1:
+                sum_sin += np.sin(phi_matrix[i,j+1])
+                sum_cos += np.cos(phi_matrix[i,j+1])
+
+            # x-component
+            if i == 0:
+                sum_sin += np.sin(phi_l)
+                sum_cos += np.cos(phi_l)
+                sum_sin += np.sin(phi_matrix[i+1, j])
+                sum_cos += np.cos(phi_matrix[i+1, j])
+            elif i == Nx - 1:
+                sum_sin += np.sin(phi_r)
+                sum_cos += np.cos(phi_r)
+                sum_sin += np.sin(phi_matrix[i-1, j])
+                sum_cos += np.cos(phi_matrix[i-1, j])
+            else:
+                sum_sin += np.sin(phi_matrix[i+1,j])
+                sum_cos += np.cos(phi_matrix[i+1,j])
+                sum_sin += np.sin(phi_matrix[i-1, j])
+                sum_cos += np.cos(phi_matrix[i-1, j])
+            new_phi = np.arctan(sum_sin / sum_cos)
+            old_phi = phi_matrix[i,j]
+
+            # is it new_phi or new_phi + pi? Calulate scalar product
+            # of points on unit circle
+            if np.cos(new_phi)*np.cos(old_phi) + \
+               np.sin(new_phi)*np.sin(old_phi) < 0:
+                new_phi += np.pi
+            # normalize to (-pi, pi)
+            new_phi = np.fmod(new_phi, 2 * np.pi)
+            if new_phi > np.pi:
+                new_phi -= 2 * np.pi
+                
+            phi_matrix[i, j] = new_phi
+            
+            delta_phi += np.abs(old_phi - new_phi)
+    return delta_phi
+            
 
 def current_phase_relation(gamma_x_matrix, gamma_y_matrix):
     x_currents = np.sin(gamma_x_matrix)
@@ -195,19 +263,18 @@ def gen_vector_potential(f):
     # f: f = psi / psi_0 flux per palette / magnetic_flux_quantum
     A_x = np.linspace(0, -Ny * f * const_flux, Ny) + Ny/2 * f * const_flux
     A_x = np.tile(A_x, (Nx-1, 1))
-    A_y = np.zeros((Nx-2, Ny-1))
+    A_y = np.zeros((Nx, Ny-1))
     return(-2 * const_e / const_hbar * A_x, -2 * const_e / const_hbar  * A_y)
     
-def gen_phi0_current(I_DC, noise):
-    I_JJ = I_DC / Ny
-    delta_phi_approx = np.arcsin(I_JJ)
-    phi_start = np.linspace(-delta_phi_approx * (Nx - 1), 0, Nx)
+def gen_phi0_current(j, noise):
+    delta_phi_approx = j
+    phi_start = np.linspace(delta_phi_approx,  Nx * delta_phi_approx, Nx)
     phi_start = np.tile(phi_start, (Ny, 1)).T
     phi_start += noise * numpy.random.randn(Nx, Ny)
     return phi_start
 
 def gen_phi0_vortex(x0, y0):
-    phi_start = np.arctan2(island_y_coords - y0, island_x_coords - x0)
+    phi_start = np.arctan2(y0 - island_y_coords, x0 - island_x_coords)
     return phi_start
 
 def normalize_phase(phi):
@@ -216,124 +283,216 @@ def normalize_phase(phi):
     phi[phi > np.pi] -= 2*np.pi
     return phi
 
-f = 1 / (Nx * Ny)
-A_x, A_y = gen_vector_potential(f)
-I_DC = 0
+A_x, A_y = gen_vector_potential(0)
+def plot_phi_matrix(phi_matrix):
+    # m = phi_matrix.copy()
+    # m = np.flip(m, axis=1)
+    # m = np.swapaxes(m, 0, 1)
+    # plt.imshow(m/np.pi, aspect='equal', cmap='gray')
+    # plt.colorbar(format="%.1f", label='φ')
+    # plt.show()
+
+    m2 = phi_matrix.copy()
+    gamma_x, gamma_y = gamma_matrices(m2, A_x, A_y)
+    x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
+
+    plt.clf()
+    plt.cla()
+    
+    plt.quiver(x_current_xcoords, x_current_ycoords,
+           x_currents, np.zeros(x_currents.shape),
+           pivot='mid', units='width', scale=2*Nx, width=1/(20*Nx))
+    plt.quiver(y_current_xcoords, y_current_ycoords,
+           np.zeros(y_currents.shape), y_currents,
+           pivot='mid', units='width', scale=2*Nx, width=1/(20*Nx))
+    plt.scatter(island_x_coords, island_y_coords, marker='s', c='b', s=5)
+    plt.show()
+
+
+j = 0.2
 
 x0 = int(Nx/2) - 0.5
-y0 = int(Ny/2) - 0.1
+y0 = int(Ny/2) - 0.5
 
-phi_start = gen_phi0_vortex(x0, y0)
-phi_start += gen_phi0_current(I_DC, 0)
-print("cost function of start: ", cost_function(phi_start, I_DC, A_x, A_y))
-res = optimize_jja(phi_start, I_DC, A_x, A_y)
-print("cost function after optimization = ", res.fun)
-phi_matrix = phi_vector_to_phi_matrix(res.x)
-F = free_energy(phi_matrix, A_x, A_y)
-print("free energy: ", F)
+# phi_matrix = np.linspace(phi_r / (Nx+1), Nx * phi_r / (Nx + 1), Nx)
+# phi_matrix = np.tile(phi_matrix, (Ny, 1)).T
+j_vals = np.linspace(-0.001, 0.001, 11)
+j_meas_vals = []
+j0_meas_vals = []
+F_vals = []
+F0_vals = []
+delta_final = 1e-2
 
-# I_vals = np.linspace(0, Ny/5, 20)
-# F_vals = []
-# I_real_vals = []
-# cost_function_vals = []
+for j in j_vals:
+    phi_matrix = gen_phi0_current(j, 0)
+    phi_matrix += gen_phi0_vortex(x0, y0)
+    phi_r = np.pi + j * (Ny + 1)
 
-# for I_DC in I_vals:
-#     phi_start = gen_phi0_current(I_DC, 0)
-#     phi_start += gen_phi0_vortex(x0, y0)
-
-#     gamma_x_start, gamma_y_start = gamma_matrices(phi_start, A_x, A_y)
-#     print("cost function of start: ", cost_function(phi_start, I_DC, A_x, A_y))
-#     res = optimize_jja(phi_start, I_DC, A_x, A_y)
-#     print("cost function after optimization = ", res.fun)
-#     cost_function_vals.append(res.fun)
+    for i in range(1000):
+        delta = rzchowski_benz_tinkham_solver(phi_matrix, phi_r)
+#        plot_phi_matrix(phi_matrix)
+        print("j = %g, i = %d, delta = %g" %(j, i, delta))
+        if delta < delta_final:
+            break
+    gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
+    x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
+    j_meas_vals.append(np.sum(x_currents[0,:]) / Ny)
     
-#     phi_matrix = phi_vector_to_phi_matrix(res.x)
-#     #
-#     # calculate gammas/currents
-#     #
-#     gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
-#     x_current, y_current = current_phase_relation(gamma_x, gamma_y)
-#     I_real_left = np.sum(x_current[0,:])
-#     I_real_right = np.sum(x_current[-1,:])
-#     I_real = (I_real_left + I_real_right) / 2
-#     F = free_energy(phi_matrix, A_x, A_y)
-#     F_vals.append(F)
-#     I_real_vals.append(I_real)
-#     print("I_DC = %g" % (I_DC))
-#     print("I_left = %g, I_right = %g" % (I_real_left, I_real_right))
-#     print("F(I = %g) = %g" % (I_real, F))
-#     print("------------------\n")
-# F_vals = np.array(F_vals)
+    F = free_energy(phi_matrix, A_x, A_y)
+    F_vals.append(F)
 
-# plt.plot(I_real_vals, F_vals, 'x', label = "one vortex")
-# plt.legend()
-# plt.grid()
+for j in j_vals:
+    phi_matrix = gen_phi0_current(j, 0)
+    phi_r = j * (Nx + 1)
+
+    for i in range(1000):
+        delta = rzchowski_benz_tinkham_solver(phi_matrix, phi_r)
+        print("j = %g, i = %d, delta = %g" %(j, i, delta))
+        if delta < delta_final:
+            break
+    gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
+    x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
+    j0_meas_vals.append(np.sum(x_currents[0,:]) / Ny)
+    
+    F0_vals.append(free_energy(phi_matrix, A_x, A_y))
+
+F_vals = np.array(F_vals)
+j_meas_vals = np.array(j_meas_vals)
+F0_vals = np.array(F0_vals)
+j0_meas_vals  = np.array(j0_meas_vals)
+
+p_vortex = np.polyfit(j_meas_vals, F_vals, 2)
+print(p_vortex)
+L_vortex = p_vortex[0]
+
+p_no_vortex = np.polyfit(j0_meas_vals, F0_vals, 2)
+print(p_no_vortex)
+L_no_vortex = p_no_vortex[0]
+print("L / L0 = ", L_vortex / L_no_vortex)
+plt.plot(j_meas_vals, F_vals, label="with vortex")
+plt.plot(j0_meas_vals, F0_vals + np.min(F_vals))
+plt.legend()
+plt.show()
+#plot_phi_matrix(phi_matrix)
+    
+
+
+# f = 1 / (Nx * Ny)
+# A_x, A_y = gen_vector_potential(f)
+# I_DC = 0
+
+
+# phi_start = gen_phi0_vortex(x0, y0)
+# phi_start += gen_phi0_current(I_DC, 0)
+# print("cost function of start: ", cost_function(phi_start, I_DC, A_x, A_y))
+# res = optimize_jja(phi_start, I_DC, A_x, A_y)
+# print("cost function after optimization = ", res.fun)
+# phi_matrix = phi_vector_to_phi_matrix(res.x)
+# F = free_energy(phi_matrix, A_x, A_y)
+# print("free energy: ", F)
+
+# # I_vals = np.linspace(0, Ny/5, 20)
+# # F_vals = []
+# # I_real_vals = []
+# # cost_function_vals = []
+
+# # for I_DC in I_vals:
+# #     phi_start = gen_phi0_current(I_DC, 0)
+# #     phi_start += gen_phi0_vortex(x0, y0)
+
+# #     gamma_x_start, gamma_y_start = gamma_matrices(phi_start, A_x, A_y)
+# #     print("cost function of start: ", cost_function(phi_start, I_DC, A_x, A_y))
+# #     res = optimize_jja(phi_start, I_DC, A_x, A_y)
+# #     print("cost function after optimization = ", res.fun)
+# #     cost_function_vals.append(res.fun)
+    
+# #     phi_matrix = phi_vector_to_phi_matrix(res.x)
+# #     #
+# #     # calculate gammas/currents
+# #     #
+# #     gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
+# #     x_current, y_current = current_phase_relation(gamma_x, gamma_y)
+# #     I_real_left = np.sum(x_current[0,:])
+# #     I_real_right = np.sum(x_current[-1,:])
+# #     I_real = (I_real_left + I_real_right) / 2
+# #     F = free_energy(phi_matrix, A_x, A_y)
+# #     F_vals.append(F)
+# #     I_real_vals.append(I_real)
+# #     print("I_DC = %g" % (I_DC))
+# #     print("I_left = %g, I_right = %g" % (I_real_left, I_real_right))
+# #     print("F(I = %g) = %g" % (I_real, F))
+# #     print("------------------\n")
+# # F_vals = np.array(F_vals)
+
+# # plt.plot(I_real_vals, F_vals, 'x', label = "one vortex")
+# # plt.legend()
+# # plt.grid()
+# # plt.show()
+
+# # plt.clf()
+# # plt.plot(I_real_vals, cost_function_vals)
+# # plt.show()
+# # exit(1)
+# gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
+# x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
+
+
+# island_x_coords, island_y_coords = np.meshgrid(np.arange(Nx), np.arange(Ny), indexing="ij")
+
+# x_current_xcoords, x_current_ycoords = np.meshgrid(np.arange(Nx-1), np.arange(Ny), indexing="ij")
+
+# x_current_xcoords = x_current_xcoords.astype('float64')
+# x_current_ycoords = x_current_ycoords.astype('float64')
+
+# x_current_xcoords += 0.5
+
+
+# y_current_xcoords, y_current_ycoords = np.meshgrid(np.arange(Nx-2), np.arange(Ny-1), indexing="ij")
+
+# y_current_xcoords = y_current_xcoords.astype('float64')
+# y_current_ycoords = y_current_ycoords.astype('float64')
+
+# y_current_xcoords += 1
+# y_current_ycoords += 0.5
+
+# plt.clf()
+# plt.title("gamma")
+# plt.axes().set_aspect('equal')
+# plt.quiver(x_current_xcoords, x_current_ycoords,
+#            normalize_phase(gamma_x), np.zeros(x_currents.shape),
+#            pivot='mid', units='width', scale=2*Nx, width=1/(20*Nx))
+# plt.quiver(y_current_xcoords, y_current_ycoords,
+#            np.zeros(y_currents.shape), normalize_phase(gamma_y),
+#            pivot='mid', units='width', scale=2*Nx, width=1/(20*Nx))
+# plt.scatter(island_x_coords, island_y_coords, marker='s', c='b', s=5)
 # plt.show()
 
 # plt.clf()
-# plt.plot(I_real_vals, cost_function_vals)
+# plt.title("current")
+# plt.axes().set_aspect('equal')
+# plt.quiver(x_current_xcoords, x_current_ycoords,
+#            x_currents, np.zeros(x_currents.shape),
+#            pivot='mid', units='width', scale=2*Nx, width=1/(20*Nx))
+# plt.quiver(y_current_xcoords, y_current_ycoords,
+#            np.zeros(y_currents.shape), y_currents,
+#            pivot='mid', units='width', scale=2*Nx, width=1/(20*Nx))
+# plt.scatter(island_x_coords, island_y_coords, marker='s', c='b', s=5)
+
+
 # plt.show()
-# exit(1)
-gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
-x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
 
+# plt.show()
 
-island_x_coords, island_y_coords = np.meshgrid(np.arange(Nx), np.arange(Ny), indexing="ij")
+# plt.clf()
 
-x_current_xcoords, x_current_ycoords = np.meshgrid(np.arange(Nx-1), np.arange(Ny), indexing="ij")
-
-x_current_xcoords = x_current_xcoords.astype('float64')
-x_current_ycoords = x_current_ycoords.astype('float64')
-
-x_current_xcoords += 0.5
-
-
-y_current_xcoords, y_current_ycoords = np.meshgrid(np.arange(Nx-2), np.arange(Ny-1), indexing="ij")
-
-y_current_xcoords = y_current_xcoords.astype('float64')
-y_current_ycoords = y_current_ycoords.astype('float64')
-
-y_current_xcoords += 1
-y_current_ycoords += 0.5
-
-plt.clf()
-plt.title("gamma")
-plt.axes().set_aspect('equal')
-plt.quiver(x_current_xcoords, x_current_ycoords,
-           normalize_phase(gamma_x), np.zeros(x_currents.shape),
-           pivot='mid', units='width', scale=2*Nx, width=1/(20*Nx))
-plt.quiver(y_current_xcoords, y_current_ycoords,
-           np.zeros(y_currents.shape), normalize_phase(gamma_y),
-           pivot='mid', units='width', scale=2*Nx, width=1/(20*Nx))
-plt.scatter(island_x_coords, island_y_coords, marker='s', c='b', s=5)
-plt.show()
-
-plt.clf()
-plt.title("current")
-plt.axes().set_aspect('equal')
-plt.quiver(x_current_xcoords, x_current_ycoords,
-           x_currents, np.zeros(x_currents.shape),
-           pivot='mid', units='width', scale=2*Nx, width=1/(20*Nx))
-plt.quiver(y_current_xcoords, y_current_ycoords,
-           np.zeros(y_currents.shape), y_currents,
-           pivot='mid', units='width', scale=2*Nx, width=1/(20*Nx))
-plt.scatter(island_x_coords, island_y_coords, marker='s', c='b', s=5)
-
-
-plt.show()
-
-plt.show()
-
-plt.clf()
-
-phi_matrix = np.flip(phi_matrix, axis=1)
-phi_matrix = np.swapaxes(phi_matrix, 0, 1)
-plt.title("phi")
-plt.imshow(phi_matrix, aspect='equal', cmap='gray')
-plt.colorbar(format="%.1f", label='φ')
-plt.show()
-import code
-code.interact()
+# phi_matrix = np.flip(phi_matrix, axis=1)
+# phi_matrix = np.swapaxes(phi_matrix, 0, 1)
+# plt.title("phi")
+# plt.imshow(phi_matrix, aspect='equal', cmap='gray')
+# plt.colorbar(format="%.1f", label='φ')
+# plt.show()
+# import code
+# code.interact()
 
 # output_dir = parser_args.output_dir
 # pdf_viewer = parser_args.pdf_viewer
