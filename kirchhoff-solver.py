@@ -113,7 +113,7 @@ def gamma_matrices(phi_matrix, A_x_matrix, A_y_matrix):
     # diff in x-direction
     gamma_x = np.zeros((Nx - 1, Ny))
     gamma_y = np.zeros((Nx, Ny-1))
-    gamma_x += A_x_matrix
+    gamma_x += A_x_matrix[1:-1,:]
                        
     # internal gammas
     gamma_x += phi_matrix[1:,:] - phi_matrix[:-1,:]
@@ -184,9 +184,12 @@ def rzchowski_benz_tinkham_solver(phi_matrix, phi_r):
 
             # is it new_phi or new_phi + pi? Calulate scalar product
             # of points on unit circle
+            # phase 
             if np.cos(new_phi)*np.cos(old_phi) + \
                np.sin(new_phi)*np.sin(old_phi) < 0:
                 new_phi += np.pi
+
+                
             # normalize to (-pi, pi)
             new_phi = np.fmod(new_phi, 2 * np.pi)
             if new_phi > np.pi:
@@ -197,6 +200,49 @@ def rzchowski_benz_tinkham_solver(phi_matrix, phi_r):
             delta_phi += np.abs(old_phi - new_phi)
     return delta_phi
             
+
+def newton_solver(phi_matrix, phi_r, A_x, A_y):
+    delta_phi = 0
+    phi_l = 0
+
+    # phi ->  phi - f(phi) / f'(phi)
+    # Solve Kirchoff equation for each island
+    for i in range(Nx):
+        for j in range(Ny):
+            f = 0
+            f_prime = 0
+            phi_i_j = phi_matrix[i,j]
+            Ic_y = 1
+            # y-component
+            if j > 0:
+                f += Ic_y *np.sin(phi_i_j - phi_matrix[i,j-1] + A_y[i, j-1])
+                f_prime += Ic_y*np.cos(phi_i_j - phi_matrix[i,j-1] + A_y[i, j-1])
+            if j < Ny - 1:
+                f += Ic_y *np.sin(phi_i_j - phi_matrix[i,j+1] - A_y[i, j])
+                f_prime += Ic_y *np.cos(phi_i_j - phi_matrix[i,j+1] - A_y[i,j])
+
+            # x-component
+            if i == 0:
+                f += np.sin(phi_i_j - phi_l + A_x[0, j])
+                f_prime += np.cos(phi_i_j - phi_l + A_x[0, j])
+                f += np.sin(phi_i_j - phi_matrix[i+1, j] - A_x[1, j])
+                f_prime += np.cos(phi_i_j - phi_matrix[i+1, j] - A_x[1,j])
+            elif i == Nx - 1:
+                f += np.sin(phi_i_j - phi_r - A_x[i+1, j])
+                f_prime += np.cos(phi_i_j - phi_r- A_x[i+1, j])
+                f += np.sin(phi_i_j - phi_matrix[i-1, j] + A_x[i,j])
+                f_prime += np.cos(phi_i_j - phi_matrix[i-1, j] + A_x[i,j])
+            else:
+                f += np.sin(phi_i_j - phi_matrix[i+1,j]- A_x[i+1, j])
+                f_prime += np.cos(phi_i_j - phi_matrix[i+1,j]- A_x[i+1, j])
+                f += np.sin(phi_i_j - phi_matrix[i-1, j]+ A_x[i,j])
+                f_prime += np.cos(phi_i_j - phi_matrix[i-1, j]+ A_x[i,j])
+            new_phi = phi_i_j - f / f_prime
+
+            phi_matrix[i, j] = new_phi
+            
+            delta_phi += np.abs(phi_i_j- new_phi)
+    return delta_phi
 
 def current_phase_relation(gamma_x_matrix, gamma_y_matrix):
     x_currents = np.sin(gamma_x_matrix)
@@ -261,10 +307,12 @@ def optimize_jja(phi_start, I_DC, A_x_matrix, A_y_matrix, *args, **kwargs):
 def gen_vector_potential(f):
     # Nx x Ny JJA
     # f: f = psi / psi_0 flux per palette / magnetic_flux_quantum
-    A_x = np.linspace(0, -Ny * f * const_flux, Ny) + Ny/2 * f * const_flux
-    A_x = np.tile(A_x, (Nx-1, 1))
-    A_y = np.zeros((Nx, Ny-1))
-    return(-2 * const_e / const_hbar * A_x, -2 * const_e / const_hbar  * A_y)
+
+    A_x = np.linspace(0, -(Ny-1) * f, Ny) + Ny/2 * f
+    A_x = np.tile(A_x, (Nx + 1, 1))
+    A_y = np.linspace(0, (Nx-1) * f, Nx) - Nx/2 * f
+    A_y = np.tile(A_y, (Ny - 1, 1)).T
+    return(-np.pi* A_x, -np.pi  * A_y)
     
 def gen_phi0_current(j, noise):
     delta_phi_approx = j
@@ -283,8 +331,8 @@ def normalize_phase(phi):
     phi[phi > np.pi] -= 2*np.pi
     return phi
 
-A_x, A_y = gen_vector_potential(0)
-def plot_phi_matrix(phi_matrix):
+
+def plot_phi_matrix(phi_matrix, A_x, A_y):
     # m = phi_matrix.copy()
     # m = np.flip(m, axis=1)
     # m = np.swapaxes(m, 0, 1)
@@ -308,6 +356,11 @@ def plot_phi_matrix(phi_matrix):
     plt.scatter(island_x_coords, island_y_coords, marker='s', c='b', s=5)
     plt.show()
 
+# print(A_x.shape)
+# print(A_y.shape)
+# print_matrix(A_x/np.pi)
+# print_matrix(A_y/np.pi)
+
 
 j = 0.2
 
@@ -316,45 +369,52 @@ y0 = int(Ny/2) - 0.5
 
 # phi_matrix = np.linspace(phi_r / (Nx+1), Nx * phi_r / (Nx + 1), Nx)
 # phi_matrix = np.tile(phi_matrix, (Ny, 1)).T
-j_vals = np.linspace(-0.001, 0.001, 11)
+j_vals = np.linspace(0.499, 0.01, 31)
 j_meas_vals = []
 j0_meas_vals = []
 F_vals = []
 F0_vals = []
 delta_final = 1e-2
 
-for j in j_vals:
-    phi_matrix = gen_phi0_current(j, 0)
-    phi_matrix += gen_phi0_vortex(x0, y0)
-    phi_r = np.pi + j * (Ny + 1)
+phi_matrix = gen_phi0_current(j, 0)
 
-    for i in range(1000):
-        delta = rzchowski_benz_tinkham_solver(phi_matrix, phi_r)
-#        plot_phi_matrix(phi_matrix)
+#for j in j_vals:
+for f in np.linspace(1.001 / 20.0, 0.33, 1):
+    phi_matrix = gen_phi0_vortex(x0, y0)
+    A_x, A_y = gen_vector_potential(f)
+    phi_r = np.pi
+    for i in range(10000):
+        delta = newton_solver(phi_matrix, phi_r, A_x, A_y)
         print("j = %g, i = %d, delta = %g" %(j, i, delta))
+        # if i % 10 == 0:
+        #     plot_phi_matrix(phi_matrix, A_x, A_y)
         if delta < delta_final:
             break
-    gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
-    x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
-    j_meas_vals.append(np.sum(x_currents[0,:]) / Ny)
-    
-    F = free_energy(phi_matrix, A_x, A_y)
-    F_vals.append(F)
+    print("f = ", f)
+    plot_phi_matrix(phi_matrix, A_x, A_y)
 
-for j in j_vals:
-    phi_matrix = gen_phi0_current(j, 0)
-    phi_r = j * (Nx + 1)
-
-    for i in range(1000):
-        delta = rzchowski_benz_tinkham_solver(phi_matrix, phi_r)
-        print("j = %g, i = %d, delta = %g" %(j, i, delta))
-        if delta < delta_final:
-            break
-    gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
-    x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
-    j0_meas_vals.append(np.sum(x_currents[0,:]) / Ny)
+    # gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
+    # x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
+    # j_meas_vals.append(np.sum(x_currents[0,:]) / Ny)
     
-    F0_vals.append(free_energy(phi_matrix, A_x, A_y))
+    # F = free_energy(phi_matrix, A_x, A_y)
+    # F_vals.append(F)
+plot_phi_matrix(phi_matrix, A_x, A_y)
+
+# for j in j_vals:
+#     phi_matrix = gen_phi0_current(j, 0)
+#     phi_r = j * (Nx + 1)
+    
+#     for i in range(10000):
+#         delta = newton_solver(phi_matrix, phi_r, A_x, A_y)
+#         print("j = %g, i = %d, delta = %g" %(j, i, delta))
+#         if delta < delta_final:
+#             break
+#     gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
+#     x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
+#     j0_meas_vals.append(np.sum(x_currents[0,:]) / Ny)
+    
+#     F0_vals.append(free_energy(phi_matrix, A_x, A_y))
 
 F_vals = np.array(F_vals)
 j_meas_vals = np.array(j_meas_vals)
@@ -369,8 +429,9 @@ p_no_vortex = np.polyfit(j0_meas_vals, F0_vals, 2)
 print(p_no_vortex)
 L_no_vortex = p_no_vortex[0]
 print("L / L0 = ", L_vortex / L_no_vortex)
-plt.plot(j_meas_vals, F_vals, label="with vortex")
-plt.plot(j0_meas_vals, F0_vals + np.min(F_vals))
+print("L_V / L_JJ = ", (L_vortex/L_no_vortex - 1) * Nx * Ny)
+plt.plot(j_meas_vals, F_vals, 'x', label="with vortex")
+plt.plot(j0_meas_vals, F0_vals, 'x')
 plt.legend()
 plt.show()
 #plot_phi_matrix(phi_matrix)
