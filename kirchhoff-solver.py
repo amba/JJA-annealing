@@ -201,6 +201,41 @@ def rzchowski_benz_tinkham_solver(phi_matrix, phi_r):
     return delta_phi
             
 
+def newton_solver_free_energy(phi_matrix, phi_r, A_x, A_y):
+    delta_phi = 0
+    phi_l = 0
+    epsilon = 0.5
+    # phi ->  phi - f(phi) / f'(phi)
+    # Solve Kirchoff equation for each island
+    for i in range(Nx):
+        for j in range(Ny):
+            f_prime = 0
+            phi_i_j = phi_matrix[i,j]
+            Ic_y = 1
+            # y-component
+            if j > 0:
+                f_prime += Ic_y*np.sin(phi_i_j - phi_matrix[i,j-1] + A_y[i, j-1])
+            if j < Ny - 1:
+                f_prime += Ic_y *np.sin(phi_i_j - phi_matrix[i,j+1] - A_y[i,j])
+
+            # x-component
+            if i == 0:
+                f_prime += np.sin(phi_i_j - phi_l + A_x[0, j])
+                f_prime += np.sin(phi_i_j - phi_matrix[i+1, j] - A_x[1,j])
+            elif i == Nx - 1:
+                f_prime += np.sin(phi_i_j - phi_r- A_x[i+1, j])
+                f_prime += np.sin(phi_i_j - phi_matrix[i-1, j] + A_x[i,j])
+            else:
+                f_prime += np.sin(phi_i_j - phi_matrix[i+1,j]- A_x[i+1, j])
+                f_prime += np.sin(phi_i_j - phi_matrix[i-1, j]+ A_x[i,j])
+            new_phi = phi_i_j - epsilon * f_prime
+
+            phi_matrix[i, j] = new_phi
+            
+            delta_phi += np.abs(phi_i_j- new_phi)
+    return delta_phi
+
+
 def newton_solver(phi_matrix, phi_r, A_x, A_y):
     delta_phi = 0
     phi_l = 0
@@ -265,44 +300,6 @@ def free_energy(phi, A_x, A_y):
     return E
 
 
-def phi_vector_to_phi_matrix(phi_vector):
-    return np.reshape(phi_vector, (Nx, Ny))
-
-def phi_matrix_to_phi_vector(phi):
-    return np.reshape(phi, Nx * Ny)
-
-def cost_function(phi, I_DC, A_x_matrix, A_y_matrix):
-        gamma_x, gamma_y = gamma_matrices(phi, A_x_matrix, A_y_matrix)
-        x_current, y_current = current_phase_relation(gamma_x, gamma_y)
-        # internal Kirchoff Law:
-        # div I is calculated only for non-busbar islands
-        # div I has size (Nx-2, Ny)
-        # div I(island) = outgoing current - ingoing current
-        div_I = np.zeros((Nx - 2, Ny))
-        div_I += x_current[1:,:]
-        div_I -= x_current[:-1,:]
-        div_I[:,:-1] += y_current
-        div_I[:,1:] -= y_current
-        
-        I_left_bar = np.sum(x_current[0,:])
-        I_right_bar = np.sum(x_current[-1,:])
-        
-      #  print("I_left_bar: ", I_left_bar)
-        return np.sum(np.abs(div_I)) + np.abs(I_left_bar - I_DC) + np.abs(I_right_bar - I_DC)
-
-
-def optimize_jja(phi_start, I_DC, A_x_matrix, A_y_matrix, *args, **kwargs):
-    
-    bounds = np.array([[-10*np.pi, 10*np.pi]])
-    bounds = np.repeat(bounds, Nx * Ny, axis=0)
-    
-    def f(phi_vector):
-        phi = phi_vector_to_phi_matrix(phi_vector)
-        return cost_function(phi, I_DC, A_x_matrix, A_y_matrix)
-    
-    x0 = phi_matrix_to_phi_vector(phi_start)
-    return scipy.optimize.dual_annealing(f, x0=x0, maxiter=500, restart_temp_ratio=1e-12, initial_temp=1e-1, visit=2.5, bounds=bounds, no_local_search=True)
-    
 # include factor -2e / hbar in vector potential
 def gen_vector_potential(f):
     # Nx x Ny JJA
@@ -369,52 +366,54 @@ y0 = int(Ny/2) - 0.5
 
 # phi_matrix = np.linspace(phi_r / (Nx+1), Nx * phi_r / (Nx + 1), Nx)
 # phi_matrix = np.tile(phi_matrix, (Ny, 1)).T
-j_vals = np.linspace(0.499, 0.01, 31)
+j_vals = np.linspace(0.06, 0.2, 21)
 j_meas_vals = []
 j0_meas_vals = []
 F_vals = []
 F0_vals = []
 delta_final = 1e-2
 
-phi_matrix = gen_phi0_current(j, 0)
-
+j = 0.05
 #for j in j_vals:
-for f in np.linspace(1.001 / 20.0, 0.33, 1):
-    phi_matrix = gen_phi0_vortex(x0, y0)
+f = 1 / (Nx * Ny)
+#f = 0
+for j in j_vals:
     A_x, A_y = gen_vector_potential(f)
-    phi_r = np.pi
-    for i in range(10000):
-        delta = newton_solver(phi_matrix, phi_r, A_x, A_y)
-        print("j = %g, i = %d, delta = %g" %(j, i, delta))
+    phi_matrix = gen_phi0_current(j, 0)
+    phi_matrix += gen_phi0_vortex(x0, y0)
+    phi_r = np.pi + j * (Nx + 1)
+    for i in range(1000):
+        delta = newton_solver_free_energy(phi_matrix, phi_r, A_x, A_y)
+        print("f = %g, j = %g, i = %d, delta = %g" %(f, j, i, delta))
         # if i % 10 == 0:
         #     plot_phi_matrix(phi_matrix, A_x, A_y)
         if delta < delta_final:
             break
     print("f = ", f)
-    plot_phi_matrix(phi_matrix, A_x, A_y)
 
-    # gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
-    # x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
-    # j_meas_vals.append(np.sum(x_currents[0,:]) / Ny)
+    gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
+    x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
+    j_meas_vals.append(np.sum(x_currents[0,:]) / Ny)
     
-    # F = free_energy(phi_matrix, A_x, A_y)
-    # F_vals.append(F)
-plot_phi_matrix(phi_matrix, A_x, A_y)
+    F = free_energy(phi_matrix, A_x, A_y)
+    F_vals.append(F)
+#plot_phi_matrix(phi_matrix, A_x, A_y)
 
-# for j in j_vals:
-#     phi_matrix = gen_phi0_current(j, 0)
-#     phi_r = j * (Nx + 1)
+for j in j_vals:
+    # control: B = 0, N_vortex = 0
+    phi_matrix = gen_phi0_current(j, 0)
+    phi_r = j * (Nx + 1)
+    A_x, A_y = gen_vector_potential(0)
+    for i in range(10000):
+        delta = newton_solver_free_energy(phi_matrix, phi_r, A_x, A_y)
+        print("j = %g, i = %d, delta = %g" %(j, i, delta))
+        if delta < delta_final:
+            break
+    gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
+    x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
+    j0_meas_vals.append(np.sum(x_currents[0,:]) / Ny)
     
-#     for i in range(10000):
-#         delta = newton_solver(phi_matrix, phi_r, A_x, A_y)
-#         print("j = %g, i = %d, delta = %g" %(j, i, delta))
-#         if delta < delta_final:
-#             break
-#     gamma_x, gamma_y = gamma_matrices(phi_matrix, A_x, A_y)
-#     x_currents, y_currents = current_phase_relation(gamma_x, gamma_y)
-#     j0_meas_vals.append(np.sum(x_currents[0,:]) / Ny)
-    
-#     F0_vals.append(free_energy(phi_matrix, A_x, A_y))
+    F0_vals.append(free_energy(phi_matrix, A_x, A_y))
 
 F_vals = np.array(F_vals)
 j_meas_vals = np.array(j_meas_vals)
